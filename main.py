@@ -355,7 +355,7 @@ class FileRowWidget(QFrame):
 
         # ── Hash block – single clickable widget, two lines ────────────────
         self._hash_frame = QWidget()
-        self._hash_frame.setStyleSheet("background: transparent;")          # crucial
+        # self._hash_frame.setStyleSheet("background: transparent;")
         self._hash_frame.setCursor(Qt.PointingHandCursor)
         self._hash_frame.setToolTip("Нажмите, чтобы скопировать MD5 + SHA256")
         self._hash_frame.mousePressEvent = lambda e: self._on_copy_hashes()
@@ -594,7 +594,7 @@ class HashKitWindow(QMainWindow):
     # ── UI construction ────────────────────────────────────────────────────
     def _init_ui(self):
         self.setWindowTitle("HashKit")
-        self.setMinimumSize(620, 440)
+        self.setMinimumSize(720, 440)
 
         central = QWidget()
         self.setCentralWidget(central)
