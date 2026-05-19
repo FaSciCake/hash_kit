@@ -981,7 +981,14 @@ class HashKitWindow(QMainWindow):
         if row:
             row.set_hashes(md5, sha256)
             # set_hashes calls _refresh_item_size internally
-        self._log(f"✓ {Path(path_str).name}  md5={md5}  sha256={sha256}")
+
+        name = Path(path_str).name
+        self._log(name)  # filename
+        if self.compute_md5:
+            self._log(f"MD5: {md5}")  # MD5 line (if enabled)
+        if self.compute_sha256:
+            self._log(f"SHA256: {sha256}")  # SHA256 line (if enabled)
+        self._log("")  # blank line separator
 
     def _on_error(self, path_str: str, msg: str):
         self._log(f"✗ {Path(path_str).name}: {msg}")
