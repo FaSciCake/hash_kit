@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QTextEdit,
     QCheckBox, QFileDialog, QGroupBox, QListWidget,
-    QListWidgetItem, QSizePolicy, QAbstractItemView, QFrame
+    QListWidgetItem, QSizePolicy, QAbstractItemView, QFrame, QToolTip
 )
 from PySide6.QtGui import (
     QTextCursor, QDragEnterEvent, QDropEvent,
@@ -172,28 +172,70 @@ QStatusBar {
     font-size: 11px;
     padding: 2px 8px;
 }
+
+QToolTip {
+    background-color: #ffffff;
+    color: #2d2d2d;
+    border: 1px solid #c8cfe0;
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 12px;
+    font-weight: normal;
+    opacity: 240;
+}
 """
 
 
 def apply_light_palette(app: QApplication):
-    """Force light palette regardless of OS dark/light mode."""
+    """
+    Force light palette regardless of OS dark/light mode.
+
+    Key insight: Qt tooltips use the *Inactive* color group of QPalette,
+    not Active. Windows 11 dark mode sets Inactive.ToolTipBase and
+    Inactive.ToolTipText to dark values, which is why all our previous
+    attempts failed — we were only setting the Active group.
+    We must set both groups, AND call QToolTip.setPalette() which is the
+    global static override that actually wins over the native style.
+    """
     pal = QPalette()
-    pal.setColor(QPalette.Window, QColor("#f5f6fa"))
-    pal.setColor(QPalette.WindowText, QColor("#2d2d2d"))
-    pal.setColor(QPalette.Base, QColor("#ffffff"))
-    pal.setColor(QPalette.AlternateBase, QColor("#f0f2f8"))
-    pal.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
-    pal.setColor(QPalette.ToolTipText, QColor("#2d2d2d"))
-    pal.setColor(QPalette.Text, QColor("#2d2d2d"))
-    pal.setColor(QPalette.Button, QColor("#ffffff"))
-    pal.setColor(QPalette.ButtonText, QColor("#2d2d2d"))
-    pal.setColor(QPalette.BrightText, QColor("#ff0000"))
-    pal.setColor(QPalette.Link, QColor("#4a6cf7"))
-    pal.setColor(QPalette.Highlight, QColor("#4a6cf7"))
-    pal.setColor(QPalette.HighlightedText, QColor("#ffffff"))
-    pal.setColor(QPalette.Disabled, QPalette.Text, QColor("#aaaaaa"))
+
+    # ── Active group (normal widget colors) ───────────────────────────────
+    for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+        pal.setColor(group, QPalette.Window,          QColor("#f5f6fa"))
+        pal.setColor(group, QPalette.WindowText,      QColor("#2d2d2d"))
+        pal.setColor(group, QPalette.Base,            QColor("#ffffff"))
+        pal.setColor(group, QPalette.AlternateBase,   QColor("#f0f2f8"))
+        pal.setColor(group, QPalette.Text,            QColor("#2d2d2d"))
+        pal.setColor(group, QPalette.Button,          QColor("#ffffff"))
+        pal.setColor(group, QPalette.ButtonText,      QColor("#2d2d2d"))
+        pal.setColor(group, QPalette.BrightText,      QColor("#ff0000"))
+        pal.setColor(group, QPalette.Link,            QColor("#4a6cf7"))
+        pal.setColor(group, QPalette.Highlight,       QColor("#4a6cf7"))
+        pal.setColor(group, QPalette.HighlightedText, QColor("#ffffff"))
+        # Tooltip colors must be set on every group — Qt picks Inactive for tooltips
+        pal.setColor(group, QPalette.ToolTipBase,     QColor("#ffffff"))
+        pal.setColor(group, QPalette.ToolTipText,     QColor("#2d2d2d"))
+
+    # Disabled overrides
+    pal.setColor(QPalette.Disabled, QPalette.Text,       QColor("#aaaaaa"))
     pal.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#aaaaaa"))
+    pal.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#aaaaaa"))
+
     app.setPalette(pal)
+
+    # ── QToolTip global static palette ────────────────────────────────────
+    # This is the authoritative override. QToolTip renders using its own
+    # static palette, independent of widget palettes. Setting it here beats
+    # the Windows 11 native dark style unconditionally.
+    tip_pal = QPalette()
+    for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+        tip_pal.setColor(group, QPalette.ToolTipBase, QColor("#ffffff"))
+        tip_pal.setColor(group, QPalette.ToolTipText, QColor("#2d2d2d"))
+        tip_pal.setColor(group, QPalette.Window,      QColor("#ffffff"))
+        tip_pal.setColor(group, QPalette.WindowText,  QColor("#2d2d2d"))
+        tip_pal.setColor(group, QPalette.Text,        QColor("#2d2d2d"))
+    QToolTip.setPalette(tip_pal)
 
 
 # ─── Hash worker ──────────────────────────────────────────────────────────────
@@ -256,6 +298,7 @@ class HashWorker(QThread):
         self.finished.emit(total, errors)
 
 
+
 # ─── File row widget ───────────────────────────────────────────────────────────
 class FileRowWidget(QFrame):
     """
@@ -298,7 +341,7 @@ class FileRowWidget(QFrame):
 
     # ── background helper ──────────────────────────────────────────────────
     def _apply_row_bg(self, collapsed: Optional[bool] = None):
-        """Set zebra background via style sheet (beats global QWidget rule)."""
+        """Set zebra background via stylesheet (beats global QWidget rule)."""
         if collapsed is None:
             collapsed = self._is_collapsed
         is_even = (self.index % 2 == 0)
@@ -307,6 +350,8 @@ class FileRowWidget(QFrame):
         else:
             color = self._BG_EVEN if is_even else self._BG_ODD
 
+        # Use the frame objectName selector so child widgets are NOT affected
+        # by this rule — they inherit transparent backgrounds from their own styles.
         self.setStyleSheet(f"QFrame#fileRow {{ background-color: {color}; }}")
 
     # ── UI construction ────────────────────────────────────────────────────
@@ -355,7 +400,8 @@ class FileRowWidget(QFrame):
 
         # ── Hash block – single clickable widget, two lines ────────────────
         self._hash_frame = QWidget()
-        # self._hash_frame.setStyleSheet("background: transparent;")
+        self._hash_frame.setObjectName("hashFrame")
+        self._hash_frame.setStyleSheet("QWidget#hashFrame { background: transparent; }")
         self._hash_frame.setCursor(Qt.PointingHandCursor)
         self._hash_frame.setToolTip("Нажмите, чтобы скопировать MD5 + SHA256")
         self._hash_frame.mousePressEvent = lambda e: self._on_copy_hashes()
@@ -386,8 +432,13 @@ class FileRowWidget(QFrame):
         btn = QPushButton(text)
         btn.setFixedSize(28, 28)
         btn.setToolTip(tip)
+        # Must override padding/font-size inline — the global sheet's
+        # padding:5px 14px clips content in these small 28×28 buttons.
+        # Hover/pressed colors are re-declared here so they aren't lost.
         btn.setStyleSheet(
-            "QPushButton { font-size: 11px; padding: 0; border-radius: 5px; }"
+            "QPushButton         { padding: 0px; font-size: 13px; border-radius: 5px; }"
+            "QPushButton:hover   { background-color: #eef2ff; border-color: #aab8f5; }"
+            "QPushButton:pressed { background-color: #dde5ff; }"
         )
         return btn
 
@@ -450,6 +501,9 @@ class FileRowWidget(QFrame):
 
     # ── Copy interactions ──────────────────────────────────────────────────
     def _on_copy_name(self):
+        # No interaction when row is collapsed
+        if self._is_collapsed:
+            return
         QApplication.clipboard().setText(self.file_path.name)
         self._flash_widget(self._name_lbl)
         self._name_copied = True
@@ -469,12 +523,22 @@ class FileRowWidget(QFrame):
 
     def _flash_widget(self, widget, duration_ms: int = 500):
         """Brief blue background flash on the given widget."""
-        orig_ss = widget.styleSheet()
-        widget.setStyleSheet(orig_ss + " background-color: #c8d9ff; border-radius: 4px;")
-        t = QTimer(self)
-        t.setSingleShot(True)
-        t.timeout.connect(lambda: widget.setStyleSheet(orig_ss))
-        t.start(duration_ms)
+        if widget is self._hash_frame:
+            # _hash_frame uses a scoped stylesheet — override it fully for flash
+            flash_ss  = "QWidget#hashFrame { background-color: #c8d9ff; border-radius: 4px; }"
+            restore_ss = "QWidget#hashFrame { background: transparent; }"
+            widget.setStyleSheet(flash_ss)
+            t = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(lambda: widget.setStyleSheet(restore_ss))
+            t.start(duration_ms)
+        else:
+            orig_ss = widget.styleSheet()
+            widget.setStyleSheet(orig_ss + " background-color: #c8d9ff; border-radius: 4px;")
+            t = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(lambda: widget.setStyleSheet(orig_ss))
+            t.start(duration_ms)
         self._flash_timers.append(t)
 
     def _check_both_copied(self):
@@ -554,6 +618,9 @@ class FileRowWidget(QFrame):
             self._name_lbl.setStyleSheet(
                 "font-weight: 500; color: #8090b0; padding: 2px 0; background: transparent;"
             )
+            # Disable pointer cursor and tooltip — no interaction in collapsed state
+            self._name_lbl.setCursor(Qt.ArrowCursor)
+            self._name_lbl.setToolTip("")
             # Reset copy flags so a filename click won't trigger sweep
             self._name_copied = False
             self._hash_copied = False
@@ -563,6 +630,9 @@ class FileRowWidget(QFrame):
             self._name_lbl.setStyleSheet(
                 "font-weight: 500; color: #2d2d2d; padding: 2px 0; background: transparent;"
             )
+            # Restore pointer cursor and full path tooltip
+            self._name_lbl.setCursor(Qt.PointingHandCursor)
+            self._name_lbl.setToolTip(str(self.file_path))
             # Reset copy state on re-expand so sweep can trigger again
             self._name_copied = False
             self._hash_copied = False
@@ -900,8 +970,11 @@ class HashKitWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    apply_light_palette(app)
+    # Order matters in Qt6: stylesheet first, then palette override.
+    # Reversed order causes the stylesheet engine to re-derive palette colors
+    # and partially undo the forced light palette.
     app.setStyleSheet(LIGHT_STYLESHEET)
+    apply_light_palette(app)
 
     window = HashKitWindow()
     window.show()
