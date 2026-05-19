@@ -6,18 +6,24 @@ from pathlib import Path
 from typing import Optional, List, Dict
 from PySide6.QtCore import (
     QThread, Signal, Qt, QMutex, QMutexLocker,
-    QTimer
+    QTimer, QUrl
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QTextEdit,
     QCheckBox, QFileDialog, QGroupBox, QListWidget,
-    QListWidgetItem, QSizePolicy, QAbstractItemView, QFrame, QToolTip
+    QListWidgetItem, QSizePolicy, QAbstractItemView, QFrame, QToolTip,
+    QTabWidget, QMessageBox
 )
 from PySide6.QtGui import (
     QTextCursor, QDragEnterEvent, QDropEvent,
-    QColor, QPalette
+    QColor, QPalette, QDesktopServices
 )
+
+# docxtpl imports
+from datetime import datetime
+from docxtpl import DocxTemplate
+import traceback
 
 # ─── Light palette forced for all OS modes ────────────────────────────────────
 LIGHT_STYLESHEET = """
@@ -298,6 +304,27 @@ class HashWorker(QThread):
         self.finished.emit(total, errors)
 
 
+# ─── Report worker (docxtpl) ─────────────────────────────────────────────────
+class ReportWorker(QThread):
+    finished = Signal(str)   # output path
+    error = Signal(str)
+
+    def __init__(self, template_path: Path, output_path: Path, context: dict):
+        super().__init__()
+        self.template_path = template_path
+        self.output_path = output_path
+        self.context = context
+
+    def run(self):
+        try:
+            doc = DocxTemplate(self.template_path)
+            doc.render(self.context)
+            doc.save(self.output_path)
+            self.finished.emit(str(self.output_path))
+        except Exception as e:
+            self.error.emit(f"{str(e)}\n{traceback.format_exc()}")
+
+
 # ─── File row widget ───────────────────────────────────────────────────────────
 class ElidedLabel(QLabel):
     def __init__(self, text="", parent=None):
@@ -319,7 +346,6 @@ class ElidedLabel(QLabel):
     def _update_elided_text(self):
         fm = self.fontMetrics()
         available_width = self.width() - 2
-        # available_width = 400
         elided = fm.elidedText(self._full_text, Qt.ElideRight, available_width)
         self.setText(elided)
 
@@ -401,11 +427,6 @@ class FileRowWidget(QFrame):
         self._top_row.addWidget(self._icon_lbl)
 
         # Clickable filename label
-        # self._name_lbl = QLabel(self.file_path.name)
-        # self._name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        # self._name_lbl.setMinimumWidth(220)
-        # self._name_lbl.setMaximumWidth(1200)
-        # self._name_lbl.setWordWrap(True)
         self._name_lbl = ElidedLabel(self.file_path.name)
         self._name_lbl.setToolTip(str(self.file_path))
         self._name_lbl.setCursor(Qt.PointingHandCursor)
@@ -678,16 +699,18 @@ class FileRowWidget(QFrame):
         self._apply_row_bg()  # re‑apply zebra stripes after renumbering
 
 
-# ─── Main window ──────────────────────────────────────────────────────────────
+# ─── Main window with tabs ────────────────────────────────────────────────────
 class HashKitWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.worker: Optional[HashWorker] = None
+        self.report_worker: Optional[ReportWorker] = None
         self.file_rows: Dict[str, FileRowWidget] = {}
         self.file_paths: List[Path] = []
         self.compute_md5 = True
         self.compute_sha256 = True
-        self._log_lines: List[str] = []  # always stored, even when log hidden
+        self._log_lines: List[str] = []
+        self.template_path: Optional[Path] = None
         self._init_ui()
         self.setAcceptDrops(True)
 
@@ -695,13 +718,17 @@ class HashKitWindow(QMainWindow):
     def _init_ui(self):
         self.setWindowTitle("HashKit")
         self.setWindowIcon(QIcon(str(resource_path("icons/icon.ico"))))
-        self.setMinimumSize(720, 440)
+        self.setMinimumSize(720, 500)
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(16, 14, 16, 10)
-        root.setSpacing(10)
+        # Main tab widget
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
+
+        # ========== FILES TAB (original content) ==========
+        files_tab = QWidget()
+        files_layout = QVBoxLayout(files_tab)
+        files_layout.setContentsMargins(16, 14, 16, 10)
+        files_layout.setSpacing(10)
 
         # ── Top toolbar ────────────────────────────────────────────────────
         toolbar = QHBoxLayout()
@@ -741,15 +768,13 @@ class HashKitWindow(QMainWindow):
         self._clear_btn.clicked.connect(self._clear_all)
         toolbar.addWidget(self._clear_btn)
 
-        root.addLayout(toolbar)
+        files_layout.addLayout(toolbar)
 
         # ── Drop hint label ────────────────────────────────────────────────
         self._drop_hint = QLabel("Перетащите файлы или папки сюда · или используйте кнопки выше")
         self._drop_hint.setAlignment(Qt.AlignCenter)
-        self._drop_hint.setStyleSheet(
-            "color: #aaa; font-size: 12px; padding: 4px 0;"
-        )
-        root.addWidget(self._drop_hint)
+        self._drop_hint.setStyleSheet("color: #aaa; font-size: 12px; padding: 4px 0;")
+        files_layout.addWidget(self._drop_hint)
 
         # ── File list ──────────────────────────────────────────────────────
         self._file_list = QListWidget()
@@ -760,14 +785,14 @@ class HashKitWindow(QMainWindow):
         self._file_list.viewport().installEventFilter(self)
         self._file_list.setFocusPolicy(Qt.NoFocus)
         self._file_list.viewport().setAcceptDrops(True)
-        root.addWidget(self._file_list, stretch=1)
+        files_layout.addWidget(self._file_list, stretch=1)
 
-        # ── Live log (hidden by default, but always populated) ─────────────
+        # ── Live log (hidden by default) ───────────────────────────────────
         self._log_text = QTextEdit()
         self._log_text.setReadOnly(True)
         self._log_text.setVisible(False)
         self._log_text.setMaximumHeight(160)
-        root.addWidget(self._log_text)
+        files_layout.addWidget(self._log_text)
 
         # ── Progress ───────────────────────────────────────────────────────
         prog_group = QGroupBox("Прогресс")
@@ -780,7 +805,7 @@ class HashKitWindow(QMainWindow):
         prog_layout.addWidget(self._progress_bar)
         prog_layout.addWidget(self._current_lbl)
         prog_group.setLayout(prog_layout)
-        root.addWidget(prog_group)
+        files_layout.addWidget(prog_group)
 
         # ── Action buttons ─────────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -796,7 +821,65 @@ class HashKitWindow(QMainWindow):
         btn_row.addWidget(self._start_btn)
         btn_row.addWidget(self._cancel_btn)
         btn_row.addStretch()
-        root.addLayout(btn_row)
+        files_layout.addLayout(btn_row)
+
+        self.tab_widget.addTab(files_tab, "📁 Файлы")
+
+        # ========== REPORT TAB ==========
+        report_tab = QWidget()
+        report_layout = QVBoxLayout(report_tab)
+        report_layout.setContentsMargins(16, 14, 16, 10)
+        report_layout.setSpacing(12)
+
+        # Template selection
+        template_group = QGroupBox("Шаблон документа")
+        template_group_layout = QVBoxLayout()
+        template_row = QHBoxLayout()
+        self._template_path_edit = QLabel("Не выбран")
+        self._template_path_edit.setStyleSheet("background:#f0f2f8; padding:6px; border-radius:4px;")
+        self._template_path_edit.setWordWrap(True)
+        self._template_browse_btn = QPushButton("Обзор...")
+        self._template_browse_btn.clicked.connect(self._browse_template)
+        template_row.addWidget(self._template_path_edit, stretch=1)
+        template_row.addWidget(self._template_browse_btn)
+        template_group_layout.addLayout(template_row)
+        template_group.setLayout(template_group_layout)
+        report_layout.addWidget(template_group)
+
+        # Available variables info
+        info_group = QGroupBox("Доступные переменные для шаблона")
+        info_text = QTextEdit()
+        info_text.setReadOnly(True)
+        info_text.setMaximumHeight(200)
+        info_text.setPlainText(
+            "Вы можете использовать следующие переменные в шаблоне:\n\n"
+            "• {{ files }} — список словарей, каждый содержит:\n"
+            "    {{ file.name }}, {{ file.md5 }}, {{ file.sha256 }}\n"
+            "• {{ file_count }} — общее количество файлов\n"
+            "• {{ timestamp }} — текущая дата и время\n\n"
+            "Пример таблицы в Word:\n"
+            "{% for f in files %}\n"
+            "{{ f.name }} | {{ f.md5 }} | {{ f.sha256 }}\n"
+            "{% endfor %}\n\n"
+        )
+        info_group.setLayout(QVBoxLayout())
+        info_group.layout().addWidget(info_text)
+        report_layout.addWidget(info_group)
+
+        # Generate button and status
+        self._generate_btn = QPushButton("📄 Создать отчёт")
+        self._generate_btn.setObjectName("primaryBtn")
+        self._generate_btn.setEnabled(False)
+        self._generate_btn.clicked.connect(self._generate_report)
+        report_layout.addWidget(self._generate_btn)
+
+        self._report_status = QLabel("Выберите шаблон DOCX и выполните хеширование файлов.")
+        self._report_status.setWordWrap(True)
+        self._report_status.setStyleSheet("color:#666; padding:4px;")
+        report_layout.addWidget(self._report_status)
+
+        report_layout.addStretch()
+        self.tab_widget.addTab(report_tab, "📄 Отчёт")
 
         self.statusBar().showMessage("Перетащите файлы сюда или используйте + Добавить файлы")
 
@@ -821,6 +904,7 @@ class HashKitWindow(QMainWindow):
         added = sum(self._add_file(Path(p)) for p in paths)
         if added:
             self._update_start_btn()
+            self._update_generate_btn()
             self.statusBar().showMessage(f"Добавлено файлов: {added}", 3000)
 
     def _browse_add_folder(self):
@@ -829,6 +913,7 @@ class HashKitWindow(QMainWindow):
             added = self._add_folder(Path(folder))
             if added:
                 self._update_start_btn()
+                self._update_generate_btn()
                 self.statusBar().showMessage(f"Добавлено файлов из папки: {added}", 3000)
 
     def _add_file(self, fp: Path) -> int:
@@ -876,6 +961,7 @@ class HashKitWindow(QMainWindow):
                 break
         self._renumber()
         self._update_start_btn()
+        self._update_generate_btn()
         self._drop_hint.setVisible(len(self.file_paths) == 0)
         self.statusBar().showMessage("Файл удалён", 2000)
 
@@ -892,6 +978,7 @@ class HashKitWindow(QMainWindow):
         self.file_paths.clear()
         self._drop_hint.setVisible(True)
         self._update_start_btn()
+        self._update_generate_btn()
         self.statusBar().showMessage("Очищено", 2000)
 
     # ── Drag & drop ────────────────────────────────────────────────────────
@@ -909,6 +996,7 @@ class HashKitWindow(QMainWindow):
                 added += self._add_folder(p)
         if added:
             self._update_start_btn()
+            self._update_generate_btn()
             self.statusBar().showMessage(f"Добавлено файлов: {added}", 3000)
         e.acceptProposedAction()
 
@@ -921,6 +1009,91 @@ class HashKitWindow(QMainWindow):
     def _update_start_btn(self):
         ok = bool(self.file_paths) and (self.compute_md5 or self.compute_sha256)
         self._start_btn.setEnabled(ok)
+
+    # ── Report tab helpers ─────────────────────────────────────────────────
+    def _browse_template(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите шаблон DOCX", "",
+            "DOCX files (*.docx)"
+        )
+        if path:
+            self.template_path = Path(path)
+            self._template_path_edit.setText(str(self.template_path))
+            self._update_generate_btn()
+
+    def _update_generate_btn(self):
+        """Enable report generation only if a template is selected and hashes are ready."""
+        if not self.template_path or not self.file_paths:
+            self._generate_btn.setEnabled(False)
+            return
+        # Check if at least one file has computed hashes
+        ready = False
+        for row in self.file_rows.values():
+            if row.hashes_ready:
+                ready = True
+                break
+        self._generate_btn.setEnabled(ready)
+
+    def _generate_report(self):
+        if not self.template_path or not self.template_path.exists():
+            self._report_status.setText("❌ Файл шаблона не найден.")
+            return
+        if not self.file_paths:
+            self._report_status.setText("❌ Нет файлов для отчёта.")
+            return
+
+        # Ask where to save the output
+        out_path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить отчёт как", "",
+            "DOCX files (*.docx)"
+        )
+        if not out_path:
+            return
+
+        # Build context from current data
+        files_data = []
+        for fp in self.file_paths:
+            row = self.file_rows.get(str(fp.resolve()))
+            if row:
+                files_data.append({
+                    'name': fp.name,
+                    'md5': row.md5 if row.md5 != "ERROR" else "",
+                    'sha256': row.sha256 if row.sha256 != "ERROR" else "",
+                })
+            else:
+                # Should not happen, but fallback
+                files_data.append({'name': fp.name, 'md5': "", 'sha256': ""})
+
+        context = {
+            'files': files_data,
+            'file_count': len(files_data),
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'file_names': [f['name'] for f in files_data],
+            'md5_list': [f['md5'] for f in files_data],
+            'sha256_list': [f['sha256'] for f in files_data],
+        }
+
+        # Start background thread
+        self._report_status.setText("⏳ Генерация отчёта...")
+        self._generate_btn.setEnabled(False)
+        self.report_worker = ReportWorker(self.template_path, Path(out_path), context)
+        self.report_worker.finished.connect(self._on_report_finished)
+        self.report_worker.error.connect(self._on_report_error)
+        self.report_worker.start()
+
+    def _on_report_finished(self, output_path: str):
+        self._report_status.setText(f"✅ Отчёт сохранён: {output_path}")
+        self._generate_btn.setEnabled(True)
+        # Ask to open folder
+        reply = QMessageBox.question(self, "Готово",
+                                     f"Отчёт создан.\nОткрыть папку с файлом?",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(output_path).parent)))
+
+    def _on_report_error(self, error_msg: str):
+        self._report_status.setText(f"❌ Ошибка: {error_msg.split(chr(10))[0]}")  # show first line only
+        self._generate_btn.setEnabled(True)
 
     # ── Live log ───────────────────────────────────────────────────────────
     def _toggle_log(self, checked: bool):
@@ -980,15 +1153,14 @@ class HashKitWindow(QMainWindow):
         row = self.file_rows.get(path_str)
         if row:
             row.set_hashes(md5, sha256)
-            # set_hashes calls _refresh_item_size internally
 
         name = Path(path_str).name
-        self._log(name)  # filename
+        self._log(name)
         if self.compute_md5:
-            self._log(f"MD5: {md5}")  # MD5 line (if enabled)
+            self._log(f"MD5: {md5}")
         if self.compute_sha256:
-            self._log(f"SHA256: {sha256}")  # SHA256 line (if enabled)
-        self._log("")  # blank line separator
+            self._log(f"SHA256: {sha256}")
+        self._log("")
 
     def _on_error(self, path_str: str, msg: str):
         self._log(f"✗ {Path(path_str).name}: {msg}")
@@ -1001,12 +1173,14 @@ class HashKitWindow(QMainWindow):
             msg += f", {errors} ошибка(ы)"
         self.statusBar().showMessage(msg, 6000)
         self._log(f"─── {msg} ───")
+        self._update_generate_btn()  # enable report button if conditions met
 
     def _on_cancelled(self):
         self._set_ui_busy(False)
         self._current_lbl.setText("Отменено")
         self.statusBar().showMessage("Отменено", 4000)
         self._log("─── Cancelled ───")
+        self._update_generate_btn()
 
     def _set_ui_busy(self, busy: bool):
         self._start_btn.setEnabled(not busy)
@@ -1035,9 +1209,6 @@ def resource_path(relative_path):
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    # Order matters in Qt6: stylesheet first, then palette override.
-    # Reversed order causes the stylesheet engine to re-derive palette colors
-    # and partially undo the forced light palette.
     app.setStyleSheet(LIGHT_STYLESHEET)
     apply_light_palette(app)
 
