@@ -1,17 +1,22 @@
-# -*- mode: python ; coding: utf-8 -*-
-
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('icons', 'icons')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['PyQt5', 'PyQt6', 'PySide2', 'test', 'unittest', 'tkinter', 'lxml', 'PIL', 'scipy', 'matplotlib'],
+    excludes=[
+        'PyQt5', 'PyQt6', 'PySide2',
+        'test', 'unittest', 'tkinter',
+        'lxml', 'PIL', 'scipy', 'matplotlib',
+        'email', 'html', 'xml',
+        'pydoc', 'doctest', 'difflib',
+        'distutils', 'setuptools',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -28,8 +33,7 @@ exe = EXE(
     name='HashKit',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
-    upx_dir="C:\\upx",
+    upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

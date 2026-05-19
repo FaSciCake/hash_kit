@@ -1,6 +1,7 @@
 import hashlib
 import sys
 import os
+from PySide6.QtGui import QIcon
 from pathlib import Path
 from typing import Optional, List, Dict
 from PySide6.QtCore import (
@@ -17,7 +18,6 @@ from PySide6.QtGui import (
     QTextCursor, QDragEnterEvent, QDropEvent,
     QColor, QPalette
 )
-
 
 # ─── Light palette forced for all OS modes ────────────────────────────────────
 LIGHT_STYLESHEET = """
@@ -202,23 +202,23 @@ def apply_light_palette(app: QApplication):
 
     # ── Active group (normal widget colors) ───────────────────────────────
     for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
-        pal.setColor(group, QPalette.Window,          QColor("#f5f6fa"))
-        pal.setColor(group, QPalette.WindowText,      QColor("#2d2d2d"))
-        pal.setColor(group, QPalette.Base,            QColor("#ffffff"))
-        pal.setColor(group, QPalette.AlternateBase,   QColor("#f0f2f8"))
-        pal.setColor(group, QPalette.Text,            QColor("#2d2d2d"))
-        pal.setColor(group, QPalette.Button,          QColor("#ffffff"))
-        pal.setColor(group, QPalette.ButtonText,      QColor("#2d2d2d"))
-        pal.setColor(group, QPalette.BrightText,      QColor("#ff0000"))
-        pal.setColor(group, QPalette.Link,            QColor("#4a6cf7"))
-        pal.setColor(group, QPalette.Highlight,       QColor("#4a6cf7"))
+        pal.setColor(group, QPalette.Window, QColor("#f5f6fa"))
+        pal.setColor(group, QPalette.WindowText, QColor("#2d2d2d"))
+        pal.setColor(group, QPalette.Base, QColor("#ffffff"))
+        pal.setColor(group, QPalette.AlternateBase, QColor("#f0f2f8"))
+        pal.setColor(group, QPalette.Text, QColor("#2d2d2d"))
+        pal.setColor(group, QPalette.Button, QColor("#ffffff"))
+        pal.setColor(group, QPalette.ButtonText, QColor("#2d2d2d"))
+        pal.setColor(group, QPalette.BrightText, QColor("#ff0000"))
+        pal.setColor(group, QPalette.Link, QColor("#4a6cf7"))
+        pal.setColor(group, QPalette.Highlight, QColor("#4a6cf7"))
         pal.setColor(group, QPalette.HighlightedText, QColor("#ffffff"))
         # Tooltip colors must be set on every group — Qt picks Inactive for tooltips
-        pal.setColor(group, QPalette.ToolTipBase,     QColor("#ffffff"))
-        pal.setColor(group, QPalette.ToolTipText,     QColor("#2d2d2d"))
+        pal.setColor(group, QPalette.ToolTipBase, QColor("#ffffff"))
+        pal.setColor(group, QPalette.ToolTipText, QColor("#2d2d2d"))
 
     # Disabled overrides
-    pal.setColor(QPalette.Disabled, QPalette.Text,       QColor("#aaaaaa"))
+    pal.setColor(QPalette.Disabled, QPalette.Text, QColor("#aaaaaa"))
     pal.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#aaaaaa"))
     pal.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#aaaaaa"))
 
@@ -232,28 +232,28 @@ def apply_light_palette(app: QApplication):
     for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
         tip_pal.setColor(group, QPalette.ToolTipBase, QColor("#ffffff"))
         tip_pal.setColor(group, QPalette.ToolTipText, QColor("#2d2d2d"))
-        tip_pal.setColor(group, QPalette.Window,      QColor("#ffffff"))
-        tip_pal.setColor(group, QPalette.WindowText,  QColor("#2d2d2d"))
-        tip_pal.setColor(group, QPalette.Text,        QColor("#2d2d2d"))
+        tip_pal.setColor(group, QPalette.Window, QColor("#ffffff"))
+        tip_pal.setColor(group, QPalette.WindowText, QColor("#2d2d2d"))
+        tip_pal.setColor(group, QPalette.Text, QColor("#2d2d2d"))
     QToolTip.setPalette(tip_pal)
 
 
 # ─── Hash worker ──────────────────────────────────────────────────────────────
 class HashWorker(QThread):
-    file_started  = Signal(str)
+    file_started = Signal(str)
     file_progress = Signal(int, int)
-    file_result   = Signal(str, str, str)   # path, md5, sha256
-    file_error    = Signal(str, str)
-    finished      = Signal(int, int)
-    cancelled     = Signal()
+    file_result = Signal(str, str, str)  # path, md5, sha256
+    file_error = Signal(str, str)
+    finished = Signal(int, int)
+    cancelled = Signal()
 
     def __init__(self, file_list: List[Path], compute_md5: bool, compute_sha256: bool):
         super().__init__()
-        self.file_list      = file_list
-        self.compute_md5    = compute_md5
+        self.file_list = file_list
+        self.compute_md5 = compute_md5
         self.compute_sha256 = compute_sha256
-        self._is_cancelled  = False
-        self._mutex         = QMutex()
+        self._is_cancelled = False
+        self._mutex = QMutex()
 
     def cancel(self):
         with QMutexLocker(self._mutex):
@@ -298,8 +298,32 @@ class HashWorker(QThread):
         self.finished.emit(total, errors)
 
 
-
 # ─── File row widget ───────────────────────────────────────────────────────────
+class ElidedLabel(QLabel):
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setMinimumWidth(0)
+        self.setWordWrap(False)
+        self.setTextFormat(Qt.PlainText)
+
+    def set_full_text(self, text: str):
+        self._full_text = text
+        self._update_elided_text()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self):
+        fm = self.fontMetrics()
+        available_width = self.width() - 2
+        # available_width = 400
+        elided = fm.elidedText(self._full_text, Qt.ElideRight, available_width)
+        self.setText(elided)
+
+
 class FileRowWidget(QFrame):
     """
     Expanded state  : number | icon | name | [collapse] [remove]
@@ -314,28 +338,30 @@ class FileRowWidget(QFrame):
     remove_requested = Signal(object)
 
     # zebra colours
-    _BG_ODD            = "#ffffff"
-    _BG_EVEN           = "#f7f8fc"
-    _BG_COLLAPSED_ODD  = "#edf0f8"
+    _BG_ODD = "#ffffff"
+    _BG_EVEN = "#f7f8fc"
+    _BG_COLLAPSED_ODD = "#edf0f8"
     _BG_COLLAPSED_EVEN = "#e6eaf5"
 
     def __init__(self, file_path: Path, index: int, parent=None):
         super().__init__(parent)
-        self.file_path   = file_path
-        self.index       = index
-        self.md5         = ""
-        self.sha256      = ""
-        self.hashes_ready     = False
-        self._name_copied     = False
-        self._hash_copied     = False
-        self._is_collapsed    = False
-        self._sweep_timer     = None
+        self.file_path = file_path
+        self.index = index
+        self.md5 = ""
+        self.sha256 = ""
+        self.hashes_ready = False
+        self._name_copied = False
+        self._hash_copied = False
+        self._is_collapsed = False
+        self._sweep_timer = None
         self._flash_timers: List[QTimer] = []
         # reference back to the QListWidgetItem so we can update sizeHint
         self._list_item: Optional[QListWidgetItem] = None
 
         self.setAutoFillBackground(True)
         self.setObjectName("fileRow")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setMinimumWidth(0)
         self._apply_row_bg()
         self._init_ui()
 
@@ -375,12 +401,16 @@ class FileRowWidget(QFrame):
         self._top_row.addWidget(self._icon_lbl)
 
         # Clickable filename label
-        self._name_lbl = QLabel(self.file_path.name)
-        self._name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        # self._name_lbl = QLabel(self.file_path.name)
+        # self._name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        # self._name_lbl.setMinimumWidth(220)
+        # self._name_lbl.setMaximumWidth(1200)
+        # self._name_lbl.setWordWrap(True)
+        self._name_lbl = ElidedLabel(self.file_path.name)
         self._name_lbl.setToolTip(str(self.file_path))
         self._name_lbl.setCursor(Qt.PointingHandCursor)
         self._name_lbl.setStyleSheet(
-            "font-weight: 500; color: #2d2d2d; padding: 2px 0; background: transparent;"
+            "font-weight: 500; padding: 2px 0;"
         )
         self._name_lbl.mousePressEvent = lambda e: self._on_copy_name()
         self._top_row.addWidget(self._name_lbl)
@@ -446,15 +476,15 @@ class FileRowWidget(QFrame):
     def _file_icon(self) -> str:
         ext = self.file_path.suffix.lower()
         icons = {
-            frozenset(['.jpg','.jpeg','.png','.gif','.bmp','.webp']): "🖼️",
-            frozenset(['.mp4','.mkv','.avi','.mov','.wmv']): "🎬",
-            frozenset(['.mp3','.wav','.flac','.ogg','.aac']): "🎵",
+            frozenset(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']): "🖼️",
+            frozenset(['.mp4', '.mkv', '.avi', '.mov', '.wmv']): "🎬",
+            frozenset(['.mp3', '.wav', '.flac', '.ogg', '.aac']): "🎵",
             frozenset(['.pdf']): "📄",
-            frozenset(['.doc','.docx']): "📝",
-            frozenset(['.zip','.rar','.7z','.tar','.gz','.xz']): "🗜️",
-            frozenset(['.exe','.msi','.dmg','.deb']): "⚙️",
-            frozenset(['.py','.js','.ts','.html','.css','.cpp','.c','.rs']): "💻",
-            frozenset(['.xls','.xlsx','.csv']): "📊",
+            frozenset(['.doc', '.docx']): "📝",
+            frozenset(['.zip', '.rar', '.7z', '.tar', '.gz', '.xz']): "🗜️",
+            frozenset(['.exe', '.msi', '.dmg', '.deb']): "⚙️",
+            frozenset(['.py', '.js', '.ts', '.html', '.css', '.cpp', '.c', '.rs']): "💻",
+            frozenset(['.xls', '.xlsx', '.csv']): "📊",
         }
         for ext_set, icon in icons.items():
             if ext in ext_set:
@@ -463,7 +493,7 @@ class FileRowWidget(QFrame):
 
     # ── Hash population ────────────────────────────────────────────────────
     def set_hashes(self, md5: str, sha256: str):
-        self.md5    = md5.upper()    if md5    not in ("", "ERROR") else md5
+        self.md5 = md5.upper() if md5 not in ("", "ERROR") else md5
         self.sha256 = sha256.upper() if sha256 not in ("", "ERROR") else sha256
         self.hashes_ready = True
 
@@ -525,7 +555,7 @@ class FileRowWidget(QFrame):
         """Brief blue background flash on the given widget."""
         if widget is self._hash_frame:
             # _hash_frame uses a scoped stylesheet — override it fully for flash
-            flash_ss  = "QWidget#hashFrame { background-color: #c8d9ff; border-radius: 4px; }"
+            flash_ss = "QWidget#hashFrame { background-color: #c8d9ff; border-radius: 4px; }"
             restore_ss = "QWidget#hashFrame { background: transparent; }"
             widget.setStyleSheet(flash_ss)
             t = QTimer(self)
@@ -550,26 +580,26 @@ class FileRowWidget(QFrame):
 
     # ── Sweep-then-collapse animation ─────────────────────────────────────
     def _start_sweep_collapse(self):
-        """1.25-second right-to-left blue sweep, then collapse."""
+        """0.75-seconds right-to-left blue sweep, then collapse."""
         if self._sweep_timer and self._sweep_timer.isActive():
             return
-        self._sweep_step  = 0
-        self._sweep_total = 50   # 50 × 25ms = 1.25 s
+        self._sweep_step = 0
+        self._sweep_total = 50  # 50 × 15ms = 0.75 s
         self._sweep_timer = QTimer(self)
-        self._sweep_timer.setInterval(25)
+        self._sweep_timer.setInterval(15)
         self._sweep_timer.timeout.connect(self._sweep_tick)
         self._sweep_timer.start()
 
     def _sweep_tick(self):
-        step  = self._sweep_step
+        step = self._sweep_step
         total = self._sweep_total
         if step > total:
             self._sweep_timer.stop()
             self._do_collapse()
             return
 
-        progress = step / total   # 0.0 → 1.0  (sweep moves left)
-        color_lit    = "#c8d9ff"  # used to be "#b8cdff"
+        progress = step / total  # 0.0 → 1.0  (sweep moves left)
+        color_lit = "#c8d9ff"  # used to be "#b8cdff"
         # maintain current zebra base so the sweep overlays cleanly
         if self._is_collapsed:
             # shouldn't happen, but fallback
@@ -597,7 +627,7 @@ class FileRowWidget(QFrame):
         self._sweep_step += 1
 
     def _do_collapse(self):
-        self.setStyleSheet("")   # clear sweep stylesheet
+        self.setStyleSheet("")  # clear sweep stylesheet
         self._set_collapsed(True)
 
     # ── Toggle expand/collapse ─────────────────────────────────────────────
@@ -645,7 +675,7 @@ class FileRowWidget(QFrame):
     def update_index(self, idx: int):
         self.index = idx
         self._num_lbl.setText(f"{idx}.")
-        self._apply_row_bg()   # re‑apply zebra stripes after renumbering
+        self._apply_row_bg()  # re‑apply zebra stripes after renumbering
 
 
 # ─── Main window ──────────────────────────────────────────────────────────────
@@ -653,17 +683,18 @@ class HashKitWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.worker: Optional[HashWorker] = None
-        self.file_rows:  Dict[str, FileRowWidget] = {}
+        self.file_rows: Dict[str, FileRowWidget] = {}
         self.file_paths: List[Path] = []
-        self.compute_md5    = True
+        self.compute_md5 = True
         self.compute_sha256 = True
-        self._log_lines: List[str] = []   # always stored, even when log hidden
+        self._log_lines: List[str] = []  # always stored, even when log hidden
         self._init_ui()
         self.setAcceptDrops(True)
 
     # ── UI construction ────────────────────────────────────────────────────
     def _init_ui(self):
         self.setWindowTitle("HashKit")
+        self.setWindowIcon(QIcon(str(resource_path("icons/icon.ico"))))
         self.setMinimumSize(720, 440)
 
         central = QWidget()
@@ -725,6 +756,8 @@ class HashKitWindow(QMainWindow):
         self._file_list.setDragEnabled(False)
         self._file_list.setAcceptDrops(True)
         self._file_list.setSelectionMode(QAbstractItemView.NoSelection)
+        self._file_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._file_list.viewport().installEventFilter(self)
         self._file_list.setFocusPolicy(Qt.NoFocus)
         self._file_list.viewport().setAcceptDrops(True)
         root.addWidget(self._file_list, stretch=1)
@@ -742,7 +775,7 @@ class HashKitWindow(QMainWindow):
         prog_layout.setSpacing(4)
         self._progress_bar = QProgressBar()
         self._progress_bar.setTextVisible(False)
-        self._current_lbl  = QLabel("Готово")
+        self._current_lbl = QLabel("Готово")
         self._current_lbl.setStyleSheet("font-size: 11px; color: #777;")
         prog_layout.addWidget(self._progress_bar)
         prog_layout.addWidget(self._current_lbl)
@@ -751,7 +784,7 @@ class HashKitWindow(QMainWindow):
 
         # ── Action buttons ─────────────────────────────────────────────────
         btn_row = QHBoxLayout()
-        self._start_btn  = QPushButton("▶  Запустить хеширование")
+        self._start_btn = QPushButton("▶  Запустить хеширование")
         self._start_btn.setObjectName("primaryBtn")
         self._start_btn.setEnabled(False)
         self._start_btn.clicked.connect(self._start_hashing)
@@ -766,6 +799,18 @@ class HashKitWindow(QMainWindow):
         root.addLayout(btn_row)
 
         self.statusBar().showMessage("Перетащите файлы сюда или используйте + Добавить файлы")
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        if obj is self._file_list.viewport() and event.type() == QEvent.Resize:
+            # When the list's viewport resizes, stretch all row widgets
+            width = self._file_list.viewport().width()
+            for i in range(self._file_list.count()):
+                item = self._file_list.item(i)
+                w = self._file_list.itemWidget(item)
+                if w:
+                    w.setFixedWidth(width)
+        return super().eventFilter(obj, event)
 
     # ── File addition ──────────────────────────────────────────────────────
     def _browse_add_files(self):
@@ -802,6 +847,8 @@ class HashKitWindow(QMainWindow):
 
         # back‑reference for size‑hint updates
         row._list_item = item
+
+        row.setFixedWidth(self._file_list.viewport().width())
 
         # Update drop hint
         self._drop_hint.setVisible(len(self.file_paths) == 0)
@@ -867,7 +914,7 @@ class HashKitWindow(QMainWindow):
 
     # ── Options & start button ──────────────────────────────────────────────
     def _update_opts(self):
-        self.compute_md5    = self._md5_cb.isChecked()
+        self.compute_md5 = self._md5_cb.isChecked()
         self.compute_sha256 = self._sha256_cb.isChecked()
         self._update_start_btn()
 
@@ -966,6 +1013,17 @@ class HashKitWindow(QMainWindow):
             self._progress_bar.setValue(0)
 
 
+def resource_path(relative_path):
+    try:
+        if hasattr(sys, '_MEIPASS'):
+            base_path = Path(sys._MEIPASS)
+        else:
+            base_path = Path(__file__).parent
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 def main():
     app = QApplication(sys.argv)
@@ -975,6 +1033,9 @@ def main():
     # and partially undo the forced light palette.
     app.setStyleSheet(LIGHT_STYLESHEET)
     apply_light_palette(app)
+
+    icon_path = str(resource_path("icons/icon.ico"))
+    app.setWindowIcon(QIcon(icon_path))
 
     window = HashKitWindow()
     window.show()
