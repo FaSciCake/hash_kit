@@ -138,12 +138,16 @@ celerybeat.pid
 .env
 .envrc
 .venv
-.venv-build
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Custom environment directories
+.venv-dev
+.venv-build
+.build_wheels_win
 
 # Spyder project settings
 .spyderproject

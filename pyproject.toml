@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "HashKit"
-version = "0.9.1"
+version = "0.9.2"
 description = "A cross-platform file hashing utility"
 requires-python = ">3.9"
 dependencies = [
-    "Pyside6==6.9.1",
+    "Pyside6",
+    "docxtpl"
 ]
 
 #[project.scripts]
@@ -16,5 +17,14 @@ dependencies = [
 
 [project.optional-dependencies]
 build = [
-    "pyinstaller==6.14.1",
+    "pyinstaller",
 ]
+
+# Fix for flat-layout discovery error
+[tool.setuptools.packages.find]
+exclude = [
+    "build_wheels_win*","build_wheels_linux*",
+    ".venv-build*", ".venv-dev*",
+    "icons*"
+]
+#exclude = []

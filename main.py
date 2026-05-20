@@ -667,7 +667,7 @@ class FileRowWidget(QFrame):
             self._toggle_btn.setText("▼")
             self._toggle_btn.setToolTip("Развернуть")
             self._name_lbl.setStyleSheet(
-                "font-weight: 500; color: #8090b0; padding: 2px 0; background: transparent;"
+                "font-weight: 500; padding: 2px 0;"
             )
             # Disable pointer cursor and tooltip — no interaction in collapsed state
             self._name_lbl.setCursor(Qt.ArrowCursor)
@@ -679,7 +679,7 @@ class FileRowWidget(QFrame):
             self._toggle_btn.setText("▲")
             self._toggle_btn.setToolTip("Свернуть")
             self._name_lbl.setStyleSheet(
-                "font-weight: 500; color: #2d2d2d; padding: 2px 0; background: transparent;"
+                "font-weight: 500; padding: 2px 0;"
             )
             # Restore pointer cursor and full path tooltip
             self._name_lbl.setCursor(Qt.PointingHandCursor)
@@ -854,7 +854,7 @@ class HashKitWindow(QMainWindow):
         info_text.setPlainText(
             "Вы можете использовать следующие переменные в шаблоне:\n\n"
             "• {{ files }} — список словарей, каждый содержит:\n"
-            "    {{ file.name }}, {{ file.md5 }}, {{ file.sha256 }}\n"
+            "    {{ files[0].name }}, {{ files[0].md5 }}, {{ files[0].sha256 }}\n"
             "• {{ file_count }} — общее количество файлов\n"
             "• {{ timestamp }} — текущая дата и время\n\n"
             "Пример таблицы в Word:\n"

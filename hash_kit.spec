@@ -12,10 +12,8 @@ a = Analysis(
     excludes=[
         'PyQt5', 'PyQt6', 'PySide2',
         'test', 'unittest', 'tkinter',
-        'lxml', 'PIL', 'scipy', 'matplotlib',
-        'email', 'html', 'xml',
+        'PIL', 'scipy', 'matplotlib',
         'pydoc', 'doctest', 'difflib',
-        'distutils', 'setuptools',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
