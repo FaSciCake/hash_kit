@@ -381,6 +381,7 @@ class FileRowWidget(QFrame):
         self._is_collapsed = False
         self._sweep_timer = None
         self._flash_timers: List[QTimer] = []
+        self._hash_swapped = False   # True while "📋 Скопировано!" is showing
         # reference back to the QListWidgetItem so we can update sizeHint
         self._list_item: Optional[QListWidgetItem] = None
 
@@ -557,6 +558,21 @@ class FileRowWidget(QFrame):
             return
         QApplication.clipboard().setText(self.file_path.name)
         self._flash_widget(self._name_lbl)
+
+        # ── text swap: filename → "📋 Скопировано!" for 750 ms ──────────────
+        self._name_lbl.set_full_text("📋 Скопировано!")
+        self._name_lbl.setCursor(Qt.ArrowCursor)   # no re-click during swap
+        t = QTimer(self)
+        t.setSingleShot(True)
+        t.timeout.connect(self._restore_name_label)
+        t.start(750)
+        self._flash_timers.append(t)
+
+        # ── status bar ───────────────────────────────────────────────────────
+        self._find_status_bar().showMessage(
+            f"Скопировано имя: {self.file_path.name}", 3000
+        )
+
         self._name_copied = True
         self._check_both_copied()
 
@@ -566,9 +582,33 @@ class FileRowWidget(QFrame):
             return
         if self.md5 in ("", "ERROR") and self.sha256 in ("", "ERROR"):
             return
+        if self._hash_swapped:   # already showing feedback, ignore re-click
+            return
         text = f"MD5: {self.md5}\nSHA256: {self.sha256}"
         QApplication.clipboard().setText(text)
         self._flash_widget(self._hash_frame)
+
+        # ── swap both hash labels to a single centred confirmation ───────────
+        self._hash_swapped = True
+        self._md5_lbl.setTextFormat(Qt.PlainText)
+        self._sha256_lbl.setTextFormat(Qt.PlainText)
+        self._md5_lbl.setText("📋 Скопировано!")
+        self._hash_frame.setCursor(Qt.ArrowCursor)   # no re-click during swap
+        self._md5_lbl.setStyleSheet(
+            "font-family: 'Segoe UI', Arial, sans-serif;"
+            "font-size: 12px; color: #4a6cf7; font-weight: 600;"
+            "padding: 1px 4px; background: transparent;"
+        )
+        self._sha256_lbl.setText("")
+        t = QTimer(self)
+        t.setSingleShot(True)
+        t.timeout.connect(self._restore_hash_labels)
+        t.start(750)
+        self._flash_timers.append(t)
+
+        # ── status bar ───────────────────────────────────────────────────────
+        self._find_status_bar().showMessage("Скопировано: MD5 + SHA256", 3000)
+
         self._hash_copied = True
         self._check_both_copied()
 
@@ -591,6 +631,46 @@ class FileRowWidget(QFrame):
             t.timeout.connect(lambda: widget.setStyleSheet(orig_ss))
             t.start(duration_ms)
         self._flash_timers.append(t)
+
+    def _restore_name_label(self):
+        """Restore elided filename after the text-swap timer fires."""
+        self._name_lbl.set_full_text(self.file_path.name)
+        if not self._is_collapsed:
+            self._name_lbl.setCursor(Qt.PointingHandCursor)
+
+    def _restore_hash_labels(self):
+        """Restore MD5 / SHA256 labels after the text-swap timer fires."""
+        self._hash_swapped = False
+        mono_style = (
+            "font-family: 'Consolas','JetBrains Mono','Courier New',monospace;"
+            "font-size: 11px; color: #555; padding: 1px 4px;"
+            "background: transparent;"
+        )
+        self._md5_lbl.setStyleSheet(mono_style)
+        self._sha256_lbl.setStyleSheet(mono_style)
+        self._md5_lbl.setTextFormat(Qt.RichText)
+        self._sha256_lbl.setTextFormat(Qt.RichText)
+        self._md5_lbl.setText(
+            f"<span style='color:#999;font-size:10px'>MD5&nbsp;&nbsp;&nbsp;</span>"
+            f"&nbsp;{self._fmt(self.md5)}"
+        )
+        self._sha256_lbl.setText(
+            f"<span style='color:#999;font-size:10px'>SHA256</span>"
+            f"&nbsp;{self._fmt(self.sha256)}"
+        )
+        if not self._is_collapsed:
+            self._hash_frame.setCursor(Qt.PointingHandCursor)
+
+    def _find_status_bar(self):
+        """Walk up the widget tree to find the QMainWindow status bar."""
+        w = self.parent()
+        while w is not None:
+            if hasattr(w, 'statusBar'):
+                return w.statusBar()
+            w = w.parent()
+        class _Noop:
+            def showMessage(self, *a, **kw): pass
+        return _Noop()
 
     def _check_both_copied(self):
         # Guard: never start sweep if the row is already collapsed
